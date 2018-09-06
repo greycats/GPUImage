@@ -30,6 +30,11 @@
     BOOL isFullYUVRange;
 
     int imageBufferWidth, imageBufferHeight;
+
+    BOOL hasAudioTrack;
+    AVPlayer *theAudioPlayer;
+    CFAbsoluteTime startActualFrameTime;
+    CGFloat currentVideoTime;
 }
 
 - (void)processAsset;
@@ -171,15 +176,21 @@
     }
     
     if (_shouldRepeat) keepLooping = YES;
+
+    currentVideoTime = 0.0f;
     
     previousFrameTime = kCMTimeZero;
     previousActualFrameTime = CFAbsoluteTimeGetCurrent();
   
     NSDictionary *inputOptions = [NSDictionary dictionaryWithObject:[NSNumber numberWithBool:YES] forKey:AVURLAssetPreferPreciseDurationAndTimingKey];
     AVURLAsset *inputAsset = [[AVURLAsset alloc] initWithURL:self.url options:inputOptions];
+
+    if (self.playSound) {
+        [self setupSound];
+    }
     
     GPUImageMovie __block *blockSelf = self;
-    
+
     [inputAsset loadValuesAsynchronouslyForKeys:[NSArray arrayWithObject:@"tracks"] completionHandler: ^{
         dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
             NSError *error = nil;
@@ -188,6 +199,9 @@
             {
                 return;
             }
+
+            startActualFrameTime = CFAbsoluteTimeGetCurrent() - currentVideoTime;
+
             blockSelf.asset = inputAsset;
             [blockSelf processAsset];
             blockSelf = nil;
@@ -217,6 +231,7 @@
 
     NSArray *audioTracks = [self.asset tracksWithMediaType:AVMediaTypeAudio];
     BOOL shouldRecordAudioTrack = (([audioTracks count] > 0) && (self.audioEncodingTarget != nil) );
+    hasAudioTrack = ([audioTracks count] > 0);
     AVAssetReaderTrackOutput *readerAudioTrackOutput = nil;
 
     if (shouldRecordAudioTrack)
@@ -260,6 +275,12 @@
     {
             NSLog(@"Error reading from file at URL: %@", self.url);
         return;
+    }
+
+    if (self.playSound && hasAudioTrack)
+    {
+        [theAudioPlayer seekToTime:kCMTimeZero];
+        [theAudioPlayer play];
     }
 
     __unsafe_unretained GPUImageMovie *weakSelf = self;
@@ -809,6 +830,12 @@ static CVReturn renderCallback(CVDisplayLinkRef displayLink,
 #endif
     }
 
+    if (theAudioPlayer != nil)
+    {
+        [theAudioPlayer pause];
+        [theAudioPlayer seekToTime:kCMTimeZero];
+    }
+
     if ([self.delegate respondsToSelector:@selector(didCompletePlayingMovie)]) {
         [self.delegate didCompletePlayingMovie];
     }
@@ -872,6 +899,18 @@ static CVReturn renderCallback(CVDisplayLinkRef displayLink,
 
 - (BOOL)videoEncodingIsFinished {
     return videoEncodingIsFinished;
+}
+
+- (void) setupSound
+{
+    if (theAudioPlayer != nil)
+    {
+        [theAudioPlayer pause];
+        [theAudioPlayer seekToTime:kCMTimeZero];
+        theAudioPlayer = nil;
+    }
+
+    theAudioPlayer = [[AVPlayer alloc] initWithURL:self.url];
 }
 
 @end
